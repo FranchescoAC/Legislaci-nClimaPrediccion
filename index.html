@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analizador de Clima</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            padding: 1.5rem;
+            transition: all 0.3s ease-in-out;
+        }
+        .btn {
+            transition: background-color 0.3s, transform 0.2s;
+        }
+        .btn:hover {
+            transform: translateY(-2px);
+        }
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        /* Custom styles for file input */
+        .file-input-wrapper {
+            position: relative;
+            overflow: hidden;
+            display: inline-block;
+            cursor: pointer;
+        }
+        .file-input-wrapper input[type=file] {
+            font-size: 100px;
+            position: absolute;
+            left: 0;
+            top: 0;
+            opacity: 0;
+            cursor: pointer;
+        }
+        .file-input-button {
+            background-color: #4a5568;
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 0.375rem;
+            cursor: pointer;
+        }
+        .file-input-button:hover {
+            background-color: #2d3748;
+        }
+        .prose {
+            line-height: 1.6;
+        }
+        .prose h3 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-top: 1.5rem;
+            margin-bottom: 0.5rem;
+        }
+        .prose strong {
+            font-weight: 600;
+        }
+        .prose ul {
+            list-style-type: disc;
+            padding-left: 1.5rem;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+
+    <div class="container mx-auto p-4 md:p-8 max-w-4xl">
+        <header class="text-center mb-8">
+            <h1 class="text-3xl md:text-4xl font-bold text-gray-900">Analizador de Clima Inteligente</h1>
+            <p class="text-gray-600 mt-2">Obtén el clima actual, súbe tu .csv y recibe un análisis comparativo con IA.</p>
+        </header>
+
+        <!-- Controls -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+            <div class="card">
+                <label for="city-input" class="block text-lg font-medium mb-2">1. Introduce una Ciudad</label>
+                <div class="flex">
+                    <input type="text" id="city-input" placeholder="Ej: London, Paris, Quito" class="w-full px-4 py-2 border border-gray-300 rounded-l-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <button id="get-weather-btn" class="btn bg-blue-600 text-white font-bold py-2 px-4 rounded-r-md hover:bg-blue-700">
+                        Obtener Clima
+                    </button>
+                </div>
+            </div>
+            <div class="card flex flex-col justify-center">
+                <label class="block text-lg font-medium mb-2">2. Sube tu archivo .csv</label>
+                <div class="file-input-wrapper">
+                    <button class="file-input-button">Seleccionar Archivo</button>
+                    <input type="file" id="csv-file-input" accept=".csv">
+                </div>
+                <span id="file-name" class="text-gray-500 mt-2 text-sm">Ningún archivo seleccionado.</span>
+            </div>
+        </div>
+
+        <!-- Results -->
+        <div id="results-container" class="space-y-8">
+            <!-- Weather Display -->
+            <div id="weather-output" class="card hidden"></div>
+
+            <!-- Gemini Analysis -->
+            <div id="gemini-output" class="card hidden"></div>
+        </div>
+        
+        <!-- Loader Modal -->
+        <div id="loader-modal" class="hidden fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50">
+            <div class="bg-white p-8 rounded-lg shadow-xl text-center">
+                <div class="loader mx-auto"></div>
+                <p class="mt-4 text-lg font-medium">Analizando datos...</p>
+                <p class="text-gray-500">Esto puede tardar unos segundos.</p>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        const cityInput = document.getElementById('city-input');
+        const getWeatherBtn = document.getElementById('get-weather-btn');
+        const csvFileInput = document.getElementById('csv-file-input');
+        const fileNameSpan = document.getElementById('file-name');
+        const weatherOutput = document.getElementById('weather-output');
+        const geminiOutput = document.getElementById('gemini-output');
+        const loaderModal = document.getElementById('loader-modal');
+
+        let currentWeatherData = null;
+        let csvData = null;
+
+        // API Key for OpenWeatherMap provided by the user
+        const weatherApiKey = '72c4e33babfabcb045cc45d1a7ea381f';
+        // API Key for Gemini is handled by the environment (free tier)
+        const geminiApiKey = 'AIzaSyBy_NdlEFj_4NZxdyHnT302YagCwkF-ICs';
+
+
+        // Event listener for the weather button
+        getWeatherBtn.addEventListener('click', fetchWeather);
+        cityInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                fetchWeather();
+            }
+        });
+        
+        // Event listener for the file input
+        csvFileInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (file) {
+                fileNameSpan.textContent = file.name;
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    csvData = e.target.result;
+                    console.log("CSV data loaded.");
+                    checkAndAnalyze();
+                };
+                reader.readAsText(file);
+            } else {
+                fileNameSpan.textContent = 'Ningún archivo seleccionado.';
+                csvData = null;
+            }
+        });
+
+        async function fetchWeather() {
+            const city = cityInput.value.trim();
+            if (!city) {
+                showError(weatherOutput, "Por favor, introduce el nombre de una ciudad.");
+                return;
+            }
+
+            weatherOutput.innerHTML = '<div class="loader mx-auto"></div><p class="text-center mt-2">Obteniendo clima...</p>';
+            weatherOutput.classList.remove('hidden');
+            geminiOutput.classList.add('hidden');
+
+            const apiUrl = `https://api.openweathermap.org/data/2.5/weather?q=${city}&appid=${weatherApiKey}&units=metric&lang=es`;
+
+            try {
+                const response = await fetch(apiUrl);
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.message || `Error ${response.status}`);
+                }
+                const data = await response.json();
+                currentWeatherData = data;
+                displayWeather(data);
+                checkAndAnalyze();
+            } catch (error) {
+                console.error("Error fetching weather:", error);
+                showError(weatherOutput, `No se pudo obtener el clima. Error: ${error.message}. Verifica el nombre de la ciudad y la API key.`);
+                currentWeatherData = null;
+            }
+        }
+
+        function displayWeather(data) {
+            const { name, main, weather, wind, sys } = data;
+            const iconUrl = `https://openweathermap.org/img/wn/${weather[0].icon}@2x.png`;
+            
+            weatherOutput.innerHTML = `
+                <h2 class="text-2xl font-bold mb-4">Clima Actual en ${name}, ${sys.country}</h2>
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-5xl font-bold">${Math.round(main.temp)}°C</p>
+                        <p class="text-lg capitalize">${weather[0].description}</p>
+                    </div>
+                    <img src="${iconUrl}" alt="${weather[0].description}" class="w-20 h-20">
+                </div>
+                <div class="mt-4 grid grid-cols-2 gap-4 text-sm">
+                    <p><strong>Sensación Real:</strong> ${Math.round(main.feels_like)}°C</p>
+                    <p><strong>Humedad:</strong> ${main.humidity}%</p>
+                    <p><strong>Viento:</strong> ${wind.speed} m/s</p>
+                    <p><strong>Presión:</strong> ${main.pressure} hPa</p>
+                </div>
+                <p class="text-xs text-gray-400 mt-4">Datos provistos por OpenWeatherMap.</p>
+            `;
+            weatherOutput.classList.remove('hidden');
+        }
+
+        function checkAndAnalyze() {
+            if (currentWeatherData && csvData) {
+                console.log("Both weather and CSV data are available. Starting analysis.");
+                analyzeWithGemini();
+            }
+        }
+
+        async function analyzeWithGemini() {
+            loaderModal.classList.remove('hidden');
+            geminiOutput.classList.add('hidden');
+
+            const prompt = `
+                Eres un asistente experto en meteorología y análisis de datos. Tu tarea es comparar los datos del clima actuales de una ciudad con los datos de un archivo CSV proporcionado por el usuario y explicar tus hallazgos de forma clara y concisa en español. El archivo CSV contiene datos de precipitación mensual.
+
+                Aquí están los datos:
+
+                1.  **Datos del Clima Actual (Fuente: OpenWeatherMap API):**
+                    \`\`\`json
+                    ${JSON.stringify(currentWeatherData, null, 2)}
+                    \`\`\`
+
+                2.  **Contenido del Archivo CSV del Usuario (Precipitación Mensual Histórica):**
+                    \`\`\`csv
+                    ${csvData}
+                    \`\`\`
+
+                **Instrucciones para tu análisis:**
+                a.  **Identifica las fuentes:** Comienza declarando claramente que los datos actuales provienen de OpenWeatherMap y los otros datos provienen del archivo CSV subido por el usuario.
+                b.  **Analiza la precipitación:** OpenWeatherMap a veces provee datos de precipitación de la última hora o tres horas (busca en el campo 'rain'). Compara esto con los datos históricos de precipitación mensual del archivo CSV para el mes actual. Si no hay datos de lluvia actuales, indícalo.
+                c.  **Compara otros datos:** Compara la información del clima actual (temperatura, humedad, viento) con cualquier tendencia que puedas inferir del archivo CSV, aunque el CSV sea solo de precipitación. Por ejemplo, puedes mencionar si el mes actual tiende a ser lluvioso según el historial.
+                d.  **Ofrece una conclusión:** Basado en tu comparación, ofrece un breve resumen. Por ejemplo: "El clima actual es seco, lo cual es típico para este mes según los datos históricos de precipitación" o "Aunque hoy no está lloviendo, el historial muestra que este es un mes con altas precipitaciones".
+                e.  **Formato:** Usa Markdown para estructurar tu respuesta con títulos, negritas y listas para que sea fácil de leer.
+            `;
+
+            try {
+                let chatHistory = [{ role: "user", parts: [{ text: prompt }] }];
+                const payload = { contents: chatHistory };
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`;
+                
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    const errorResult = await response.json();
+                    console.error('Gemini API Error Response:', errorResult);
+                    throw new Error(`La API de Gemini respondió con un error: ${errorResult.error?.message || response.statusText}`);
+                }
+
+                const result = await response.json();
+                
+                let analysisText = "No se pudo obtener un análisis.";
+                if (result.candidates && result.candidates.length > 0 &&
+                    result.candidates[0].content && result.candidates[0].content.parts &&
+                    result.candidates[0].content.parts.length > 0) {
+                    analysisText = result.candidates[0].content.parts[0].text;
+                } else {
+                     throw new Error("La respuesta de la API de Gemini no tuvo el formato esperado.");
+                }
+
+                displayGeminiAnalysis(analysisText);
+
+            } catch (error) {
+                console.error("Error calling Gemini API:", error);
+                showError(geminiOutput, `Ocurrió un error durante el análisis con IA: ${error.message}`);
+            } finally {
+                loaderModal.classList.add('hidden');
+            }
+        }
+
+        function displayGeminiAnalysis(analysis) {
+             // Basic Markdown to HTML conversion
+            let htmlAnalysis = analysis
+                .replace(/^### (.*$)/gim, '<h3>$1</h3>')
+                .replace(/^## (.*$)/gim, '<h2>$1</h2>')
+                .replace(/^# (.*$)/gim, '<h1>$1</h1>')
+                .replace(/\*\*(.*)\*\*/gim, '<strong>$1</strong>')
+                .replace(/\*(.*)\*/gim, '<em>$1</em>')
+                .replace(/`([^`]+)`/gim, '<code>$1</code>')
+                .replace(/\n/g, '<br>');
+
+             geminiOutput.innerHTML = `
+                <h2 class="text-2xl font-bold mb-4">Análisis Comparativo con IA</h2>
+                <div class="prose max-w-none text-gray-700">${htmlAnalysis}</div>
+                <p class="text-xs text-gray-400 mt-4">Análisis generado por Google Gemini.</p>
+            `;
+            geminiOutput.classList.remove('hidden');
+        }
+
+        function showError(element, message) {
+            element.innerHTML = `<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative" role="alert">
+                <strong class="font-bold">¡Error!</strong>
+                <span class="block sm:inline">${message}</span>
+            </div>`;
+            element.classList.remove('hidden');
+        }
+    </script>
+</body>
+</html>
